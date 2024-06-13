@@ -1,10 +1,13 @@
-export interface PlayerP {
+export interface Player {
   id: number;
   name: string;
   score: number;
   lives: number;
+  level: number;
 }
 
 export interface ConnectedUser {
-  name: string | null; // Mantén el nombre como nulo hasta que el usuario lo envíe
+  id: string;
+  name: string; 
+  // Mantén el nombre como nulo hasta que el usuario lo envíe
 }

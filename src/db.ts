@@ -2,10 +2,9 @@ import mongoose from "mongoose";
 
 export const connectDB = async () => {
     try {
-        const dbURI = 'mongodb://localhost:27017/ClientServerDB';
-        await mongoose.connect(dbURI);
-        console.log(">>> DB is connected");
+        await mongoose.connect('mongodb+srv://eduartrob2:eduartrob@actividades.i8r8wcz.mongodb.net/?retryWrites=true&w=majority&appName=actividades')
+        console.log(">>> DB is connected")
     } catch (error) {
-        console.error("Connection error:", error);
+        console.log(error)
     }
 }
