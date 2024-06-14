@@ -4,6 +4,7 @@ import { generateLevelData } from './models/secuences.model';
 import { connectDB } from './db';
 import mongoose from 'mongoose';
 import schemas from './models/player.model';
+import { Webhook } from './models/webhook.model'; 
 const { Player } = schemas;
 
 import cors from 'cors';
@@ -112,6 +113,25 @@ app.post("/user", (req: Request, res: Response) => {
       success: true,
       message: "evento enviado"
   });
+});
+
+
+//WEBHOOKS
+app.post('/webhooks', async (req: Request, res: Response) => {
+  const url  = req.body.webhook;
+  try {
+    if (!url) {
+      return res.status(400).json({ success: false, message: 'Se requiere una URL para el webhook.' });
+    }
+
+    const newWebhook = new Webhook({ url });
+    await newWebhook.save(); // Guarda el nuevo webhook en la base de datos
+
+    res.status(201).json({ success: true, webhook: newWebhook });
+  } catch (error) {
+    console.error('Error al crear el webhook:', error);
+    res.status(500).json({ success: false, message: 'Error interno del servidor.' });
+  }
 });
 
 // WebSockets

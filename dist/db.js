@@ -16,7 +16,7 @@ exports.connectDB = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        yield mongoose_1.default.connect('mongodb+srv://eduartrob2:eduartrob@actividades.i8r8wcz.mongodb.net/?retryWrites=true&w=majority&appName=actividades');
+        yield mongoose_1.default.connect('mongodb+srv://eduartrob2:eduartrob@actividades.i8r8wcz.mongodb.net/TheGame?retryWrites=true&w=majority&appName=actividades');
         console.log(">>> DB is connected");
     }
     catch (error) {

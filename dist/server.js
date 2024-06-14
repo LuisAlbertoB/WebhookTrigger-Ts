@@ -18,6 +18,7 @@ const secuences_model_1 = require("./models/secuences.model");
 const db_1 = require("./db");
 const mongoose_1 = __importDefault(require("mongoose"));
 const player_model_1 = __importDefault(require("./models/player.model"));
+const webhook_model_1 = require("./models/webhook.model");
 const { Player } = player_model_1.default;
 const cors_1 = __importDefault(require("cors"));
 const ws_1 = require("ws");
@@ -107,6 +108,22 @@ app.post("/user", (req, res) => {
         message: "evento enviado"
     });
 });
+//WEBHOOKS
+app.post('/webhooks', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const url = req.body.webhook;
+    try {
+        if (!url) {
+            return res.status(400).json({ success: false, message: 'Se requiere una URL para el webhook.' });
+        }
+        const newWebhook = new webhook_model_1.Webhook({ url });
+        yield newWebhook.save(); // Guarda el nuevo webhook en la base de datos
+        res.status(201).json({ success: true, webhook: newWebhook });
+    }
+    catch (error) {
+        console.error('Error al crear el webhook:', error);
+        res.status(500).json({ success: false, message: 'Error interno del servidor.' });
+    }
+}));
 // WebSockets
 wss.on('connection', (ws) => {
     if (connectedClients >= MAX_CONNECTIONS) {
