@@ -9,6 +9,8 @@ const { Player } = schemas;
 
 import cors from 'cors';
 import { WebSocketServer, WebSocket } from 'ws';
+import axios from 'axios'; // Importar axios
+
 const MAX_CONNECTIONS = 7;
 let connectedClients = 0;
 
@@ -32,6 +34,21 @@ let connectedClientsMap = new Map<string, { ws: WebSocket, playerId: mongoose.Ty
 const connectedUsers: ConnectedUser[] = [];
 let generatedKeys: string[] = [];
 let generatedScore: number;
+
+// Función para disparar los webhooks
+async function triggerWebhooks(eventType: string, eventData: any) {
+  const webhooks = await Webhook.find({});
+  for (const webhook of webhooks) {
+    try {
+      await axios.post(webhook.url, {
+        event: eventType,
+        data: eventData
+      });
+    } catch (error) {
+      console.error(`Error triggering webhook ${webhook.url}:`, error);
+    }
+  }
+}
 
 // Short Polling 
 app.get('/players', async (req: Request, res: Response) => {
@@ -83,6 +100,7 @@ function notificarNuevoPlayer(newPlayer: mongoose.Document & Player) {
   }
   playerPendientes = [];
   notifyAllClients("connectedPlayers", connectedUsers);
+  triggerWebhooks('newPlayer', newPlayer); // Disparar el webhook al registrar un nuevo jugador
 }
 
 // SSE
@@ -115,8 +133,7 @@ app.post("/user", (req: Request, res: Response) => {
   });
 });
 
-
-//WEBHOOKS
+// WEBHOOKS
 app.post('/webhooks', async (req: Request, res: Response) => {
   const url  = req.body.webhook;
   try {
@@ -161,8 +178,6 @@ wss.on('connection', (ws: WebSocket) => {
       } else {
         connectedUserName = parsedMessage.nickname;
 
-
-
         const newPlayer = new Player({
           id: new mongoose.Types.ObjectId(),
           name: playerName,
@@ -171,11 +186,10 @@ wss.on('connection', (ws: WebSocket) => {
         connectedUsers.push(newPlayer);
         await newPlayer.save();
         connectedClientsMap.set(parsedMessage.nickname, { ws, playerId: newPlayer._id });
-        notificarNuevoPlayer(newPlayer)
+        notificarNuevoPlayer(newPlayer); // Notificar y disparar el webhook
         console.log('Nuevo jugador guardado en la base de datos:', playerName);
         notifyAllClients("connectedPlayers", connectedUsers);
 
-          
         const jugadores = await schemas.Player.find({}, "name score");
         const jugador = jugadores.map(jugador => ({ name: jugador.name, score: jugador.score }));
 
@@ -187,8 +201,8 @@ wss.on('connection', (ws: WebSocket) => {
 
         for (let client of allClients) {
           client.write(scores);
-          client.write(playIn)
-      }
+          client.write(playIn);
+        }
       }
     }
     switch (parsedMessage.action) {
@@ -220,103 +234,74 @@ wss.on('connection', (ws: WebSocket) => {
         }
         break;
 
-        case "checKeys":
-          const pressedKeysString = JSON.stringify(parsedMessage.keys);
-          const generatedKeysString = JSON.stringify(generatedKeys);
-          const Session = connectedClientsMap.get(connectedUserName);
+      case "checKeys":
+        const pressedKeysString = JSON.stringify(parsedMessage.keys);
+        const generatedKeysString = JSON.stringify(generatedKeys);
+        const Session = connectedClientsMap.get(connectedUserName);
 
-          let updatedLives = 0;
-        
-          if (pressedKeysString === generatedKeysString) {
-            if (Session) {
-              await schemas.Player.updateOne(
-                { _id: Session.playerId },
-                { $inc: { score: generatedScore, level: 1 } }
-              );
-        
-              console.log('Puntuación y nivel actualizados para el usuario:', connectedUserName);
-              const updatedUser = await schemas.Player.findById(Session.playerId);
-              updatedLives = updatedUser ? updatedUser.lives : 0;
-            } else {
-              console.log('Las teclas coinciden pero el usuario no está registrado.');
-            }
+        let updatedLives = 0;
+      
+        if (pressedKeysString === generatedKeysString) {
+          if (Session) {
+            await schemas.Player.updateOne(
+              { _id: Session.playerId },
+              { $inc: { score: generatedScore, level: 1 } }
+            );
+      
+            console.log('Puntuación y nivel actualizados para el usuario:', connectedUserName);
+            const updatedUser = await schemas.Player.findById(Session.playerId);
+            updatedLives = updatedUser ? updatedUser.lives : 0;
           } else {
-            if (Session) {
-              console.log('Las teclas no coinciden. Se restará una vida al usuario.');
-              // Reducir una vida del usuario
-              await schemas.Player.updateOne(
-                { _id: Session.playerId },
-                { $inc: { lives: -1} } // Decrementar en 1 la cantidad de vidas
-              );
-
-              // Obtener la cantidad actualizada de vidas del usuario
-              const updatedUser = await schemas.Player.findById(Session.playerId);
-              updatedLives = updatedUser ? updatedUser.lives : 0;
-
-              console.log('Cantidad de vidas actualizada para el usuario:', connectedUserName);
-            } else {
-              console.log('Las teclas no coinciden o el usuario no está registrado.');
-            }
-            
+            console.log('Las teclas coinciden pero el usuario no está registrado.');
           }
-          ws.send(JSON.stringify({
-            event: "lives-",
-            data: { lives: updatedLives }
-          }));
-          // Enviar la cantidad actualizada de vidas al cliente
-          
-          break;
+        } else {
+          if (Session) {
+            console.log('Las teclas no coinciden. Se restará una vida al usuario.');
+            // Reducir una vida del usuario
+            await schemas.Player.updateOne(
+              { _id: Session.playerId },
+              { $inc: { lives: -1} }
+            );
 
-      case "lives":
-        const userLivesSession = connectedClientsMap.get(connectedUserName);
-        if (userLivesSession) {
-          const usuarioConectado = await schemas.Player.findById(userLivesSession.playerId);
-          if (usuarioConectado) {
-            
-            ws.send(JSON.stringify({
-              event: "lives",
-              data: { lives: usuarioConectado.lives }
-            }));
-          } else {
-            console.log("Usuario no encontrado en la base de datos");
+            // Obtener la cantidad actualizada de vidas del usuario
+            const updatedUser = await schemas.Player.findById(Session.playerId);
+            updatedLives = updatedUser ? updatedUser.lives : 0;
           }
         }
-        break;
-    }
 
+        ws.send(JSON.stringify({
+          event: "checKeys",
+          data: {
+            success: pressedKeysString === generatedKeysString,
+            updatedLives
+          }
+        }));
+
+        break;
+
+      default:
+        console.log('Acción no reconocida:', parsedMessage.action);
+    }
   });
 
   ws.on('close', () => {
-    console.log("Cliente desconectado.");
     connectedClients--;
-    const userSession = connectedClientsMap.get(connectedUserName);
-    if (userSession) {
-      const disconnectedUserIndex = connectedUsers.findIndex(user => user.name === connectedUserName);
-      if (disconnectedUserIndex !== -1) {
-        connectedUsers.splice(disconnectedUserIndex, 1);
-        notifyAllClients("connectedPlayers", connectedUsers);
-      } else {
-        console.log("Usuario no encontrado en la lista de usuarios conectados.");
-      }
-      connectedClientsMap.delete(connectedUserName);
-    } else {
-      console.log("Sesión de usuario no encontrada.");
-    }
+    console.log("Clientes conectados:", connectedClients);
   });
-
 });
 
-const notifyAllClients = (event: string, data: any) => {
-  wss.clients.forEach(client => {
+function notifyAllClients(event: string, data: any) {
+  wss.clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify({ event, data }));
-      console.log("cantidad de usuarios", connectedClients)
+      client.send(JSON.stringify({
+        event,
+        data
+      }));
     }
   });
-};
+}
 
 export let nivelUsuario: number;
-
 server.listen(desiredPort, () => {
-  console.log(`Server running in port:  ${desiredPort}`);
+  console.log(`Servidor escuchando en el puerto ${desiredPort}`);
 });

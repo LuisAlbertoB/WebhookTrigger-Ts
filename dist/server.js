@@ -22,6 +22,7 @@ const webhook_model_1 = require("./models/webhook.model");
 const { Player } = player_model_1.default;
 const cors_1 = __importDefault(require("cors"));
 const ws_1 = require("ws");
+const axios_1 = __importDefault(require("axios")); // Importar axios
 const MAX_CONNECTIONS = 7;
 let connectedClients = 0;
 const http = require('http');
@@ -38,6 +39,23 @@ let connectedClientsMap = new Map();
 const connectedUsers = [];
 let generatedKeys = [];
 let generatedScore;
+// Función para disparar los webhooks
+function triggerWebhooks(eventType, eventData) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const webhooks = yield webhook_model_1.Webhook.find({});
+        for (const webhook of webhooks) {
+            try {
+                yield axios_1.default.post(webhook.url, {
+                    event: eventType,
+                    data: eventData
+                });
+            }
+            catch (error) {
+                console.error(`Error triggering webhook ${webhook.url}:`, error);
+            }
+        }
+    });
+}
 // Short Polling 
 app.get('/players', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const jugadores = yield player_model_1.default.Player.find({}, "name score");
@@ -85,6 +103,7 @@ function notificarNuevoPlayer(newPlayer) {
     }
     playerPendientes = [];
     notifyAllClients("connectedPlayers", connectedUsers);
+    triggerWebhooks('newPlayer', newPlayer); // Disparar el webhook al registrar un nuevo jugador
 }
 // SSE
 app.get("/all", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -108,7 +127,7 @@ app.post("/user", (req, res) => {
         message: "evento enviado"
     });
 });
-//WEBHOOKS
+// WEBHOOKS
 app.post('/webhooks', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const url = req.body.webhook;
     try {
@@ -156,7 +175,7 @@ wss.on('connection', (ws) => {
                 connectedUsers.push(newPlayer);
                 yield newPlayer.save();
                 connectedClientsMap.set(parsedMessage.nickname, { ws, playerId: newPlayer._id });
-                notificarNuevoPlayer(newPlayer);
+                notificarNuevoPlayer(newPlayer); // Notificar y disparar el webhook
                 console.log('Nuevo jugador guardado en la base de datos:', playerName);
                 notifyAllClients("connectedPlayers", connectedUsers);
                 const jugadores = yield player_model_1.default.Player.find({}, "name score");
@@ -217,68 +236,39 @@ wss.on('connection', (ws) => {
                     if (Session) {
                         console.log('Las teclas no coinciden. Se restará una vida al usuario.');
                         // Reducir una vida del usuario
-                        yield player_model_1.default.Player.updateOne({ _id: Session.playerId }, { $inc: { lives: -1 } } // Decrementar en 1 la cantidad de vidas
-                        );
+                        yield player_model_1.default.Player.updateOne({ _id: Session.playerId }, { $inc: { lives: -1 } });
                         // Obtener la cantidad actualizada de vidas del usuario
                         const updatedUser = yield player_model_1.default.Player.findById(Session.playerId);
                         updatedLives = updatedUser ? updatedUser.lives : 0;
-                        console.log('Cantidad de vidas actualizada para el usuario:', connectedUserName);
-                    }
-                    else {
-                        console.log('Las teclas no coinciden o el usuario no está registrado.');
                     }
                 }
                 ws.send(JSON.stringify({
-                    event: "lives-",
-                    data: { lives: updatedLives }
+                    event: "checKeys",
+                    data: {
+                        success: pressedKeysString === generatedKeysString,
+                        updatedLives
+                    }
                 }));
-                // Enviar la cantidad actualizada de vidas al cliente
                 break;
-            case "lives":
-                const userLivesSession = connectedClientsMap.get(connectedUserName);
-                if (userLivesSession) {
-                    const usuarioConectado = yield player_model_1.default.Player.findById(userLivesSession.playerId);
-                    if (usuarioConectado) {
-                        ws.send(JSON.stringify({
-                            event: "lives",
-                            data: { lives: usuarioConectado.lives }
-                        }));
-                    }
-                    else {
-                        console.log("Usuario no encontrado en la base de datos");
-                    }
-                }
-                break;
+            default:
+                console.log('Acción no reconocida:', parsedMessage.action);
         }
     }));
     ws.on('close', () => {
-        console.log("Cliente desconectado.");
         connectedClients--;
-        const userSession = connectedClientsMap.get(connectedUserName);
-        if (userSession) {
-            const disconnectedUserIndex = connectedUsers.findIndex(user => user.name === connectedUserName);
-            if (disconnectedUserIndex !== -1) {
-                connectedUsers.splice(disconnectedUserIndex, 1);
-                notifyAllClients("connectedPlayers", connectedUsers);
-            }
-            else {
-                console.log("Usuario no encontrado en la lista de usuarios conectados.");
-            }
-            connectedClientsMap.delete(connectedUserName);
-        }
-        else {
-            console.log("Sesión de usuario no encontrada.");
-        }
+        console.log("Clientes conectados:", connectedClients);
     });
 });
-const notifyAllClients = (event, data) => {
-    wss.clients.forEach(client => {
+function notifyAllClients(event, data) {
+    wss.clients.forEach((client) => {
         if (client.readyState === ws_1.WebSocket.OPEN) {
-            client.send(JSON.stringify({ event, data }));
-            console.log("cantidad de usuarios", connectedClients);
+            client.send(JSON.stringify({
+                event,
+                data
+            }));
         }
     });
-};
+}
 server.listen(desiredPort, () => {
-    console.log(`Server running in port:  ${desiredPort}`);
+    console.log(`Servidor escuchando en el puerto ${desiredPort}`);
 });
